@@ -43,12 +43,13 @@ let
     "cdspr.jsn"
     "qcadsp8380.mbn"
     "qccdsp8380.mbn"
-    "qcdxmsuc8380.mbn"
+    "qcdxkmsuc8380.mbn"
     "qcdxkmsucpurwa.mbn"
   ];
 
-  # Windows file -> ath11k WCN6855 hw2.1 name. linux-firmware's copies are too
-  # old for this SKU.
+  # Windows file -> ath11k WCN6855 hw2.1 name, taken from the qcwlanhsp8380
+  # driver (the bundle has several WLAN drivers with files of the same name).
+  # linux-firmware's copies are too old for this SKU.
   wifiFiles = {
     "wlanfw20.mbn" = "amss.bin";
     "regdb.bin" = "regdb.bin";
@@ -62,6 +63,7 @@ stdenvNoCC.mkDerivation {
 
   src = driverExe;
   dontUnpack = true;
+  dontFixup = true; # nothing here is executable
   nativeBuildInputs = [
     _7zz
     zstd
@@ -73,13 +75,6 @@ stdenvNoCC.mkDerivation {
 
     mkdir extracted
     7zz x -y -bso0 -bsp0 -oextracted "$src"
-    # Installers nest archives (exe -> cab/msi/zip); unpack a few levels deep.
-    for pass in 1 2 3; do
-      while read -r a; do
-        7zz x -y -bso0 -bsp0 -o"$a.d" "$a" || true
-        mv "$a" "$a.done"
-      done < <(find extracted -type f \( -iname '*.zip' -o -iname '*.cab' -o -iname '*.msi' -o -iname '*.exe' \))
-    done
 
     runHook postBuild
   '';
@@ -90,7 +85,7 @@ stdenvNoCC.mkDerivation {
     root=$PWD/extracted
     find_one() {
       local found
-      found=$(find "$root" -type f -iname "$1" | sort | head -n1)
+      found=$(find "$root" -type f -iname "$1" -ipath "*/''${2:-}*/*" | sort | head -n1)
       if [ -z "$found" ]; then
         echo "error: $1 not found in driver bundle" >&2
         exit 1
@@ -110,7 +105,7 @@ stdenvNoCC.mkDerivation {
     ${lib.concatStrings (
       lib.mapAttrsToList (
         from: to: ''
-          install -Dm444 "$(find_one ${lib.escapeShellArg from})" "$wifi/${to}"
+          install -Dm444 "$(find_one ${lib.escapeShellArg from} qcwlanhsp8380)" "$wifi/${to}"
         ''
       ) wifiFiles
     )}
@@ -120,7 +115,7 @@ stdenvNoCC.mkDerivation {
     if [ -e "$board" ]; then cp "$board" board-2.bin; else zstd -dq "$board.zst" -o board-2.bin; fi
     python3 -I ${bdencoder}/tools/scripts/ath11k/ath11k-bdencoder -e board-2.bin > /dev/null
     rm board-2.bin
-    elf=$(find_one 'bdwlan_wcn685x_2p1_nfa725a_UX3407Q.elf')
+    elf=$(find_one 'bdwlan_wcn685x_2p1_nfa725a_UX3407Q.elf' qcwlanhsp8380)
     python3 -I - "$elf" ${lib.escapeShellArgs wifiBoardNames} <<'PY'
     import json, shutil, sys
     elf, names = sys.argv[1], sys.argv[2:]
